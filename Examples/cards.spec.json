@@ -1,0 +1,12 @@
+{
+  "models": {
+    "SetInfo":  { "code": "String", "name": "String" },
+    "Printing": { "year": "Int", "foil": {"type": "Bool", "default": false} },
+    "Card": {
+      "id": "Int", "name": "String", "mana_cost": "String?", "cmc": "Double",
+      "colors": "[String]", "set": "SetInfo", "alt_set": "SetInfo?",
+      "printings": "[Printing]", "reprints": "[Printing]?", "power": "Int?", "default": "Bool?",
+      "@entry": true
+    }
+  }
+}

@@ -1,0 +1,343 @@
+--- a/src/yyjson.c (yyjson 0.13.0)
++++ b/src/yyjson.c (YYJSON_SIZE_OPT)
+@@ -28,7 +28,7 @@
+  * MARK: - Warning Suppress (Private)
+  *============================================================================*/
+ 
+-#if defined(__clang__)
++#if defined(__clang__) && !defined(YYJSON_SIZE_OPT_NO_MINSIZE)
+ #   pragma clang diagnostic ignored "-Wunused-function"
+ #   pragma clang diagnostic ignored "-Wunused-parameter"
+ #   pragma clang diagnostic ignored "-Wunused-label"
+@@ -374,9 +374,20 @@
+ 
+ /* Macros used to provide inline information for compiler. */
+ #undef  static_inline
+-#define static_inline   static yyjson_inline
+ #undef  static_noinline
++#if YYJSON_SIZE_OPT
++/* Size-optimized build: let the compiler decide inlining (no always_inline)
++   and optimize every function in this file for minimum size. */
++#define static_inline   static inline
++#define static_noinline static yyjson_noinline
++#if defined(__clang__) && !defined(YYJSON_SIZE_OPT_NO_MINSIZE)
++#pragma clang attribute push (__attribute__((minsize)), apply_to = function)
++#define YYJSON_SIZE_OPT_PRAGMA_PUSHED 1
++#endif
++#else
++#define static_inline   static yyjson_inline
+ #define static_noinline static yyjson_noinline
++#endif
+ 
+ /* Macros for min and max. */
+ #undef  yyjson_min
+@@ -421,6 +432,13 @@
+  *============================================================================*/
+ 
+ /* Common error messages. */
++/* YYJSON_SIZE_OPT_NO_MSG: replace reader error messages with one short
++   string (err->code still identifies the error) to save ~1 KB. */
++#if YYJSON_SIZE_OPT_NO_MSG
++#define YYJSON_MSG(m) "invalid JSON (see err.code)"
++#else
++#define YYJSON_MSG(m) m
++#endif
+ #define MSG_FOPEN       "failed to open file"
+ #define MSG_FREAD       "failed to read file"
+ #define MSG_FWRITE      "failed to write file"
+@@ -3251,7 +3269,7 @@
+ static_noinline bool read_num_raw(u8 **ptr, u8 **pre, yyjson_read_flag flg,
+                                   yyjson_val *val, const char **msg) {
+ #define return_err(_pos, _msg) do { \
+-    *msg = _msg; *end = _pos; return false; \
++    *msg = YYJSON_MSG(_msg); *end = _pos; return false; \
+ } while (false)
+ 
+ #define return_raw() do { \
+@@ -3354,7 +3372,7 @@
+ 
+     /* check error */
+     if (unlikely(i == 0)) {
+-        *msg = "invalid hex number";
++        *msg = YYJSON_MSG("invalid hex number");
+         return false;
+     }
+ 
+@@ -3362,7 +3380,7 @@
+     if (unlikely(i == 16)) {
+         if (char_is_hex(cur[16]) || (sign && sig > ((u64)1 << 63))) {
+             if (!has_flg(BIGNUM_AS_RAW)) {
+-                *msg = "hex number overflow";
++                *msg = YYJSON_MSG("hex number overflow");
+                 return false;
+             }
+             cur += 16;
+@@ -3855,7 +3873,7 @@
+ static_inline bool read_num(u8 **ptr, u8 **pre, yyjson_read_flag flg,
+                             yyjson_val *val, const char **msg) {
+ #define return_err(_pos, _msg) do { \
+-    *msg = _msg; \
++    *msg = YYJSON_MSG(_msg); \
+     *end = _pos; \
+     return false; \
+ } while (false)
+@@ -4490,7 +4508,7 @@
+ static_inline bool read_num(u8 **ptr, u8 **pre, yyjson_read_flag flg,
+                             yyjson_val *val, const char **msg) {
+ #define return_err(_pos, _msg) do { \
+-    *msg = _msg; \
++    *msg = YYJSON_MSG(_msg); \
+     *end = _pos; \
+     return false; \
+ } while (false)
+@@ -4698,7 +4716,7 @@
+ 
+ /** Read unicode escape sequence. */
+ static_inline bool read_uni_esc(u8 **src_ptr, u8 **dst_ptr, const char **msg) {
+-#define return_err(_end, _msg) *msg = _msg; *src_ptr = _end; return false
++#define return_err(_end, _msg) *msg = YYJSON_MSG(_msg); *src_ptr = _end; return false
+ 
+     u8 *src = *src_ptr;
+     u8 *dst = *dst_ptr;
+@@ -4773,7 +4791,7 @@
+      Check out this example: https://godbolt.org/z/YG6a5W5Ec
+      */
+ #define return_err(_end, _msg) do { \
+-    *msg = _msg; \
++    *msg = YYJSON_MSG(_msg); \
+     *end = _end; \
+     if (con) { con[0] = _end; con[1] = dst; } \
+     return false; \
+@@ -4805,6 +4823,13 @@
+         else break;
+      })
+      */
++#if YYJSON_SIZE_OPT
++    /* Size-optimized: plain loop instead of 16x unrolled jump table.
++       Input is zero-padded, and '\0' is not a skip char, so this stops. */
++    if (quo == '"') { while (char_is_ascii_skip(*src)) src++; }
++    else { while (char_is_ascii_skip_sq(*src)) src++; }
++    goto skip_ascii_end;
++#else
+     if (quo == '"') {
+ #define expr_jump(i) \
+     if (likely(char_is_ascii_skip(src[i]))) {} \
+@@ -4841,6 +4866,8 @@
+ #undef expr_stop
+     }
+ 
++#endif
++
+ skip_ascii_end:
+     gcc_store_barrier(*src);
+     if (likely(*src == quo)) {
+@@ -4990,6 +5017,14 @@
+         else break;
+      })
+      */
++#if YYJSON_SIZE_OPT
++    if (quo == '"') { while (char_is_ascii_skip(*src)) *dst++ = *src++; }
++    else { while (char_is_ascii_skip_sq(*src)) *dst++ = *src++; }
++    goto copy_utf8;
++copy_ascii_stop_1:
++    *dst++ = *src++;
++    goto copy_utf8;
++#else
+     if (quo == '"') {
+ #define expr_jump(i) \
+     if (likely((char_is_ascii_skip(src[i])))) {} \
+@@ -5020,6 +5055,8 @@
+     repeat16_incr(expr_jump)
+ #undef expr_jump
+ 
++#endif
++
+ copy_utf8:
+     if (*src & 0x80) { /* non-ASCII character */
+         pos = src;
+@@ -5097,7 +5134,7 @@
+ static_noinline bool read_str_id(u8 **ptr, u8 *eof, yyjson_read_flag flg,
+                                  u8 **pre, yyjson_val *val, const char **msg) {
+ #define return_err(_end, _msg) do { \
+-    *msg = _msg; \
++    *msg = YYJSON_MSG(_msg); \
+     *end = _end; \
+     return false; \
+ } while (false)
+@@ -5253,11 +5290,11 @@
+     if (is_truncated_end(hdr, _pos, eof, YYJSON_READ_ERROR_##_code, flg)) { \
+         err->pos = (usize)(eof - hdr); \
+         err->code = YYJSON_READ_ERROR_UNEXPECTED_END; \
+-        err->msg = MSG_NOT_END; \
++        err->msg = YYJSON_MSG(MSG_NOT_END); \
+     } else { \
+         err->pos = (usize)(_pos - hdr); \
+         err->code = YYJSON_READ_ERROR_##_code; \
+-        err->msg = _msg; \
++        err->msg = YYJSON_MSG(_msg); \
+     } \
+     if (val_hdr) alc.free(alc.ctx, val_hdr); \
+     return NULL; \
+@@ -5358,11 +5395,11 @@
+     if (is_truncated_end(hdr, _pos, eof, YYJSON_READ_ERROR_##_code, flg)) { \
+         err->pos = (usize)(eof - hdr); \
+         err->code = YYJSON_READ_ERROR_UNEXPECTED_END; \
+-        err->msg = MSG_NOT_END; \
++        err->msg = YYJSON_MSG(MSG_NOT_END); \
+     } else { \
+         err->pos = (usize)(_pos - hdr); \
+         err->code = YYJSON_READ_ERROR_##_code; \
+-        err->msg = _msg; \
++        err->msg = YYJSON_MSG(_msg); \
+     } \
+     if (val_hdr) alc.free(alc.ctx, val_hdr); \
+     return NULL; \
+@@ -5785,11 +5822,11 @@
+     if (is_truncated_end(hdr, _pos, eof, YYJSON_READ_ERROR_##_code, flg)) { \
+         err->pos = (usize)(eof - hdr); \
+         err->code = YYJSON_READ_ERROR_UNEXPECTED_END; \
+-        err->msg = MSG_NOT_END; \
++        err->msg = YYJSON_MSG(MSG_NOT_END); \
+     } else { \
+         err->pos = (usize)(_pos - hdr); \
+         err->code = YYJSON_READ_ERROR_##_code; \
+-        err->msg = _msg; \
++        err->msg = YYJSON_MSG(_msg); \
+     } \
+     if (val_hdr) alc.free(alc.ctx, val_hdr); \
+     return NULL; \
+@@ -6258,7 +6295,7 @@
+                              yyjson_read_err *err) {
+ #define return_err(_pos, _code, _msg) do { \
+     err->pos = (usize)(_pos); \
+-    err->msg = _msg; \
++    err->msg = YYJSON_MSG(_msg); \
+     err->code = YYJSON_READ_ERROR_##_code; \
+     if (!has_flg(INSITU) && hdr) alc.free(alc.ctx, (void *)hdr); \
+     return NULL; \
+@@ -6314,11 +6351,17 @@
+ 
+     /* read json document */
+     if (likely(char_is_ctn(*cur))) {
++#if YYJSON_SIZE_OPT
++        /* Size-optimized build: the minify reader handles any whitespace;
++           the pretty reader is only a speed specialization. */
++        doc = read_root_minify(hdr, cur, eof, alc, flg, err);
++#else
+         if (char_is_space(cur[1]) && char_is_space(cur[2])) {
+             doc = read_root_pretty(hdr, cur, eof, alc, flg, err);
+         } else {
+             doc = read_root_minify(hdr, cur, eof, alc, flg, err);
+         }
++#endif
+     } else {
+         doc = read_root_single(hdr, cur, eof, alc, flg, err);
+     }
+@@ -6329,9 +6372,9 @@
+     } else {
+         /* RFC 8259: JSON text MUST be encoded using UTF-8 */
+         if (err->pos == 0 && err->code != YYJSON_READ_ERROR_MEMORY_ALLOCATION) {
+-            if (is_utf8_bom(hdr)) err->msg = MSG_ERR_BOM;
+-            else if (len >= 4 && is_utf32_bom(hdr)) err->msg = MSG_ERR_UTF32;
+-            else if (len >= 2 && is_utf16_bom(hdr)) err->msg = MSG_ERR_UTF16;
++            if (is_utf8_bom(hdr)) err->msg = YYJSON_MSG(MSG_ERR_BOM);
++            else if (len >= 4 && is_utf32_bom(hdr)) err->msg = YYJSON_MSG(MSG_ERR_UTF32);
++            else if (len >= 2 && is_utf16_bom(hdr)) err->msg = YYJSON_MSG(MSG_ERR_UTF16);
+         }
+         if (!has_flg(INSITU)) alc.free(alc.ctx, hdr);
+     }
+@@ -6348,7 +6391,7 @@
+                              yyjson_read_err *err) {
+ #define return_err(_code, _msg) do { \
+     err->pos = 0; \
+-    err->msg = _msg; \
++    err->msg = YYJSON_MSG(_msg); \
+     err->code = YYJSON_READ_ERROR_##_code; \
+     return NULL; \
+ } while (false)
+@@ -6376,7 +6419,7 @@
+                            yyjson_read_err *err) {
+ #define return_err(_code, _msg) do { \
+     err->pos = 0; \
+-    err->msg = _msg; \
++    err->msg = YYJSON_MSG(_msg); \
+     err->code = YYJSON_READ_ERROR_##_code; \
+     if (buf) alc.free(alc.ctx, buf); \
+     return NULL; \
+@@ -6480,7 +6523,7 @@
+                                yyjson_read_err *err) {
+ #define return_err(_pos, _code, _msg) do { \
+     err->pos = _pos > hdr ? (usize)(_pos - hdr) : 0; \
+-    err->msg = _msg; \
++    err->msg = YYJSON_MSG(_msg); \
+     err->code = YYJSON_READ_ERROR_##_code; \
+     return NULL; \
+ } while (false)
+@@ -6638,7 +6681,7 @@
+                              yyjson_read_err *err) {
+ #define return_err_inv_param(_msg) do { \
+     err->pos = 0; \
+-    err->msg = _msg; \
++    err->msg = YYJSON_MSG(_msg); \
+     err->code = YYJSON_READ_ERROR_INVALID_PARAMETER; \
+     return NULL; \
+ } while (false)
+@@ -6649,7 +6692,7 @@
+     } else { \
+         err->pos = (usize)(_pos - hdr); \
+         err->code = YYJSON_READ_ERROR_##_code; \
+-        err->msg = _msg; \
++        err->msg = YYJSON_MSG(_msg); \
+     } \
+     return NULL; \
+ } while (false)
+@@ -6693,7 +6736,7 @@
+ #define check_maybe_truncated_number() do { \
+     if (unlikely(cur >= end)) { \
+         if (unlikely(cur > state->cur + INCR_NUM_MAX_LEN)) { \
+-            msg = "number too long"; \
++            msg = YYJSON_MSG("number too long"); \
+             goto fail_number; \
+         } \
+         goto unexpected_end; \
+@@ -6846,12 +6889,12 @@
+         goto fail_literal_null;
+     }
+ 
+-    msg = "unexpected character, expected a valid root value";
++    msg = YYJSON_MSG("unexpected character, expected a valid root value");
+     if (cur == hdr) {
+         /* RFC 8259: JSON text MUST be encoded using UTF-8 */
+-        if (is_utf8_bom(hdr)) msg = MSG_ERR_BOM;
+-        else if (len >= 4 && is_utf32_bom(hdr)) msg = MSG_ERR_UTF32;
+-        else if (len >= 2 && is_utf16_bom(hdr)) msg = MSG_ERR_UTF16;
++        if (is_utf8_bom(hdr)) msg = YYJSON_MSG(MSG_ERR_BOM);
++        else if (len >= 4 && is_utf32_bom(hdr)) msg = YYJSON_MSG(MSG_ERR_UTF32);
++        else if (len >= 2 && is_utf16_bom(hdr)) msg = YYJSON_MSG(MSG_ERR_UTF16);
+     }
+     return_err(cur, UNEXPECTED_CHARACTER, msg);
+ 
+@@ -7142,13 +7185,13 @@
+     /* if no more data, stop the incr read */
+     if (unlikely(len >= state->buf_len)) {
+         err->code = YYJSON_READ_ERROR_UNEXPECTED_END;
+-        err->msg = MSG_NOT_END;
++        err->msg = YYJSON_MSG(MSG_NOT_END);
+         return NULL;
+     }
+     /* save parser state in extended error struct, in addition to what was
+      * stored in the last save_incr_state */
+     err->code = YYJSON_READ_ERROR_MORE;
+-    err->msg = "need more data";
++    err->msg = YYJSON_MSG("need more data");
+     state->val_end = val_end;
+     state->ctn = ctn;
+     state->alc_len = alc_len;
+@@ -11478,3 +11521,7 @@
+ }
+ 
+ #endif /* YYJSON_DISABLE_UTILS */
++
++#if defined(YYJSON_SIZE_OPT_PRAGMA_PUSHED)
++#pragma clang attribute pop
++#endif
