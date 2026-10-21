@@ -105,7 +105,9 @@ python3 tools/yylite-gen.py Examples/cards.spec.json -o Cards.generated.swift
 The spec maps each model to its properties, keyed by JSON key, e.g.
 `{"id": "Int", "mana_cost": "String?", "set": "SetInfo", "printings": "[Printing]",
 "foil": {"type": "Bool", "default": false}}`. `"@entry": true` adds `init(data:)` and
-`jsonData(pretty:)`. Run `--help` for the full format.
+`jsonData(pretty:)`. Run `--help` for the full format. `--kind struct` emits structs with the same
+API instead of final classes. For the 50 models these were 73% more model code and 3–6% slower
+to decode, so classes stay the default (see `Benchmarks/STRUCT-VS-CLASS.md`).
 
 ## Lifetime and threading
 * A `JSON` value holds a strong reference to its `JSONDocument`, so values stay valid as long as

@@ -1,7 +1,7 @@
 """Attribute linked bytes (alloc sections only) in an lld map to their source library; also report .eh_frame share."""
 import re, sys, collections
 def cat(path):
-    for key, name in [('Models50Loop.', 'Models50Loop (generated classes, forEach)'), ('Models50.', 'Models50 (generated classes)'),
+    for key, name in [('Models50Loop.', 'Models50Loop (generated classes, forEach)'), ('Models50S.', 'Models50S (generated structs)'), ('Models50.', 'Models50 (generated classes)'),
                       ('Codable50D.', 'Codable50D (Decodable-only structs)'), ('Codable50.', 'Codable50 (Codable structs)'),
                       ('CYYJSON', 'CYYJSON (yyjson C)'), ('YYLite.', 'YYLite (Swift core)')]:
         if key in path: return name

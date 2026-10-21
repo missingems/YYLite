@@ -22,7 +22,7 @@ Types: Int Int64 UInt Double Float Bool String; arrays [Int] [Double] [Bool] [St
 any model name M, [M]; add "?" for optional (missing/null -> nil; nil is omitted or written as
 null per JSONWriter.nilStrategy). {"type": T, "default": v} reads missing/null as v (scalars only).
 
-Usage: yylite-gen.py spec.json -o Models.swift [--arrays map|loop] [--module-import YYLite]
+Usage: yylite-gen.py spec.json -o Models.swift [--arrays map|loop] [--kind class|struct]
 """
 import argparse, json, re, sys
 
@@ -49,7 +49,7 @@ def swift_default(t, v):
     if t == "Bool": return "true" if v else "false"
     return repr(v)
 
-def gen(spec, arrays):
+def gen(spec, arrays, kind="class"):
     acc = spec.get("access", "public")
     pub = "public " if acc == "public" else ""
     models = spec["models"]
@@ -65,7 +65,7 @@ def gen(spec, arrays):
             opt = t.endswith("?"); base = t[:-1] if opt else t
             plist.append(dict(key=key, name=ident(p.get("name") or camel(key)), type=t, base=base, opt=opt,
                               default=p.get("default")))
-        out.append(f"{pub}final class {mname} {{")
+        out.append(f"{pub}{'final class' if kind == 'class' else 'struct'} {mname} {{")
         for q in plist:
             out.append(f"    {pub}let {q['name']}: {q['type']}")
         out.append("")
@@ -130,7 +130,7 @@ def gen(spec, arrays):
         if entry:
             out.append("")
             out.append(f"    /// Parses `data` and decodes a {mname}.")
-            out.append(f"    {pub}convenience init(data: Data) throws {{ try self.init(JSON.parse(data)) }}")
+            out.append(f"    {pub}{'convenience ' if kind == 'class' else ''}init(data: Data) throws {{ try self.init(JSON.parse(data)) }}")
             out.append(f"    /// Encodes this {mname} as UTF-8 JSON.")
             out.append(f"    {pub}func jsonData(pretty: Bool = false) throws -> Data {{")
             out.append(f"        try JSONWriter.encode(pretty: pretty) {{ self.encode($0) }}")
@@ -144,9 +144,12 @@ def main():
     ap.add_argument("spec"); ap.add_argument("-o", "--output", default="-")
     ap.add_argument("--arrays", choices=["map", "loop"], default="map",
                     help="decode [Model] with objects().map(M.init) (default) or forEachObject + append")
+    ap.add_argument("--kind", choices=["class", "struct"], default="class",
+                    help="emit `final class` (default) or `struct` models; the API is identical. "
+                         "Structs cannot contain themselves (directly or via a non-array chain).")
     a = ap.parse_args()
     spec = json.load(open(a.spec), object_pairs_hook=dict)
-    src = gen(spec, a.arrays)
+    src = gen(spec, a.arrays, a.kind)
     if a.output == "-": sys.stdout.write(src)
     else: open(a.output, "w").write(src)
 
